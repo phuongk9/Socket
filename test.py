@@ -4,14 +4,13 @@ import os
 
 
 class Client:
-    def __init__(self,host,port,url):
-        self.host = host
+    def __init__(self,port,url):
+        
         self.port = port
         self.url = url
         self.header = bytes()
         self.content = bytes()
         self.contentLength = 0
-
 
     def sendRequest(self,client):
         """ Send HTTP request to sever """
@@ -29,7 +28,6 @@ class Client:
             resource = self.url.replace("http://","")
             resource = resource[resource.find("/"):]
             
-        
         #HTTP Request
         request = 'GET {} HTTP/1.1\r\nHost: {}\r\nConnection: keep-alive\r\n\r\n'.format(resource,host)
         client.send(request.encode())
@@ -72,8 +70,8 @@ class Client:
         except:
             return (data, bytes())
         else:
-            index += len(b'\r\n\r\n')
-            return (data[:index], data[index:])
+            index += len(b'\r\n')
+            return (data[:index], data[index + 2:])
 
     def getContentLength(self, header):
         '''Return value of Content-Length. Otherwise returns 0.'''
@@ -83,7 +81,7 @@ class Client:
         return 0
 
     def getTransferEncoding(self,header):
-        """ Return true if header have Tranfer-Encoding: chunked """
+        """ Return true if header have Transfer-Encoding: chunked """
         for line in header.split(b'\r\n'):
             if b'Transfer-Encoding: chunked' in line:
                 return True
@@ -107,16 +105,16 @@ class Client:
         if self.transferEncoding:
             pass
         # Download file Content-Length
-        else:
+        elif self.contentLength > 0:
             # read until end of Content Length
             self.content += self.readContent(client)
-
-        
-        
+        else:
+            print("Neither Content-Length nor Chunked found!")
 
         return (self.header.decode(), self.content)
     
     def downloadFile(self,data):
+        """ Write data in file """
         downloadDir = os.getcwd()
         if self.url[-1] == "/" or self.url[-1] == "m":
             filename = "index.html"
@@ -131,25 +129,26 @@ class Client:
         print("Downloaded !")
         
     def connect(self):
+        """ Client create TCP socket and connect to web server at 80 port """
         client = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-        client.connect((self.host,self.port))
-        print("Client connected to : " + self.host)
+        client.connect((self.url,self.port))
+        print("Client connected to : " + self.url)
         print("-------------------------------------")
         self.sendRequest(client)
 
         self.header, self.content = self.receiveResponse(client)
-        self.downloadFile(self.content)
-            
+        #self.downloadFile(self.content)
+        print(self.header)
         client.close()
 
     
 def main():
     URL = input("Input url: ")
     PORT = 80
-    split_url = parse.urlsplit(URL)
+    #split_url = parse.urlsplit(URL)
     #Get ip 
-    HOST = socket.gethostbyname(split_url.netloc)
-    client = Client(HOST,PORT,URL)
+    #HOST = socket.gethostbyname(split_url.netloc)
+    client = Client(PORT,URL)
     client.connect()
 
 if __name__ == '__main__':

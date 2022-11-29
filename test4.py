@@ -4,6 +4,7 @@ import os
 from threading import Thread
 import re
 
+
 isInFolder = False
 folderName = ""
 class Client:
@@ -11,11 +12,9 @@ class Client:
         self.host = host
         self.port = port
         self.url = url
-        self.client = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-        self.client.connect((self.host,self.port))
-        self.client.settimeout(5)
+        
     
-    def sendRequest(self,url):
+    def sendRequest(self,client,url):
         """ Send HTTP request to sever """
         host =  url.replace("http://","")
 
@@ -33,16 +32,15 @@ class Client:
             
         #HTTP Request
         request = 'GET {} HTTP/1.1\r\nHost: {}\r\nConnection: Keep-Alive\r\n\r\n'.format(resource,host)
-        print(request)
-        self.client.sendall(request.encode())
+        client.sendall(request.encode())
 
-    def readHeader(self):
+    def readHeader(self,client):
         """ Read the header of HTTP response """
         data = b''
-        chunk_size = 1
+        chunk_size = 1024
         try:
             while b'\r\n\r\n' not in data:
-                chunk = self.client.recv(chunk_size)
+                chunk = client.recv(chunk_size)
                 if not chunk:
                     break
                 data += chunk
@@ -50,14 +48,14 @@ class Client:
             pass
         return data
 
-    def readContentLength(self,contentLength):
-        """ Read the content of HTTP response in Content-Length form """
+    def readContent(self,client,contentLength):
+        """ Read the content of HTTP response """
         data = b''
         chunk_size = 16000
         length = 0
         try:
             while  contentLength >= length: 
-                chunk = self.client.recv(chunk_size)
+                chunk = client.recv(chunk_size)
                 if not chunk:
                     break
                 data += chunk
@@ -65,31 +63,6 @@ class Client:
         except socket.timeout:
             pass
         return data
-
-    def readTransferEncoding(self):
-        """ Read the content of HTTP response in Transfer-Encoding: Chunked form """
-        content = b''
-        while b'0\r\n\r\n' not in content:
-            chunk_size = b''
-            temp = b''
-            while b'\r\n' not in chunk_size:
-                temp = self.client.recv(1)
-                chunk_size += temp
-            
-            chunk_size = int(chunk_size.decode(),16)
-            
-            if chunk_size == 0:
-                break
-            chunk = b''
-            data = b''
-            
-            chunk = self.client.recv(4096)
-            data += chunk
-            
-            chunk = self.client.recv(2)
-            content += data
-            
-        return content
 
     def separate(self, data):
         '''Separate header and content. '''
@@ -115,15 +88,15 @@ class Client:
                 return True
         return False
 
-    def receiveResponse(self):
+    def receiveResponse(self,client):
         """ Return header and content of response """
         header = bytes()
         content = bytes()
         # read until at end of header
-        data = self.readHeader()
+        data = self.readHeader(client)
 
         # separate our content and header
-        header, content = self.separate(data) 
+        header, content = self.separate(data)
 
         # get the Content-Length from the header
         contentLength = self.getContentLength(header)
@@ -133,26 +106,24 @@ class Client:
 
         #Download file Transfer-Encoding: chunked
         if transferEncoding:
-            content += self.readTransferEncoding()
+            pass
         # Download file Content-Length
         else:
             # read until end of Content Length
-            content += self.readContentLength(contentLength)
+            content += self.readContent(client,contentLength)
 
         return (header.decode(),content)
     
-    def download(self, url):
-        self.sendRequest(url)
-        header, content = self.receiveResponse()
-        self.downloadFile(url,content)
-        #print(header)
+    def download(self, client, url):
+        self.sendRequest(client,url)
+        header, content = self.receiveResponse(client)
+        self.downloadFile(client,url,content)
     
-    def downloadFolder(self,data):
+    def downloadFolder(self,client,data):
         allFile = []
         my_dict = re.findall('(?<=<a href=")[^"]*', data.decode('utf8'))
         sub = ''
         for x in my_dict:
-            
         #print(x, end = " \n")
         # simple skip page bookmarks, like #about
             if x[0] == '#':
@@ -170,17 +141,13 @@ class Client:
             
             url = x
             allFile.append(url)
-    
-        numberThread = []
-        for i in range(0,len(allFile)):
-            numberThread.append(Thread(target=self.download, args=(allFile[i],)))
-        for i in numberThread:
-            i.start()
-        for i in numberThread:
-            i.join()
+        for i in range(len(allFile)):
+            t = Thread(target=self.download, args=(client,allFile[i]))
+            t.start()
+            t.join()
             
     
-    def downloadFile(self,url,data):
+    def downloadFile(self,client,url,data):
         global isInFolder
         global folderName
         downloadDir = os.getcwd()
@@ -194,8 +161,8 @@ class Client:
             isExit = os.path.exists(path)
             if not isExit:
                 os.makedirs(path)#tao thu muc dan den
-            self.downloadFolder(data)
-            print("All files are saved in " + path)
+            self.downloadFolder(client,data)
+            print("All file are saved in " + path)
             return
         else:
             filename = url.split("/")[-1]
@@ -203,46 +170,40 @@ class Client:
 
         if(isInFolder == True):
             path = downloadDir +"\\" + folderName + "\\" + filename
-            print("Saved in " + path)
+            print("Saving to " + path)
             file = open(path, 'wb') 
             file.write(data)
             file.close()
         else:
             path = downloadDir + "\\" + filename
-            print("Saved in " + path)
+            print("Saving to " + path)
             file = open(path, 'wb') 
             file.write(data)
             file.close()
+            print("Downloaded !")
         
     def connect(self):
-        
-        print("Client connected to web server Ip: " + self.host + "\n")
-        
-        self.sendRequest(self.url)
-        header,content = self.receiveResponse()
-        self.downloadFile(self.url,content)  
-        self.client.close()
+        client = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+        client.connect((self.host,self.port))
+        client.settimeout(5)
+        print("Client connected to web server Ip: " + self.host)
+        print("----------------------------------------------")
+
+        self.sendRequest(client,self.url)
+        header,content = self.receiveResponse(client)
+        self.downloadFile(client,self.url,content)
+            
+        client.close()
 
     
-def firsActivity(URL):
+def main():
+    URL = input("Input url: ")
     PORT = 80
     split_url = parse.urlsplit(URL)
     #Get ip 
     HOST = socket.gethostbyname(split_url.netloc)
     client = Client(HOST,PORT,URL)
     client.connect()
-
-def main():
-    URL = input("Input urls: ")
-    manyURL = URL.split()
-    numberURL = len(manyURL)
-    numberThread = []
-    for i in range(0, numberURL):
-        numberThread.append(Thread(target=firsActivity, args=(manyURL[i],)))
-    for i in numberThread:
-        i.start()
-    for i in numberThread:
-        i.join()
 
 if __name__ == '__main__':
     main()
