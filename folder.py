@@ -12,8 +12,7 @@ class Client:
         self.port = port
         self.url = url
         self.client = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-        self.client.connect((self.host,self.port))
-        self.client.settimeout(5)
+        
     
     def sendRequest(self,url):
         """ Send HTTP request to sever """
@@ -33,7 +32,6 @@ class Client:
             
         #HTTP Request
         request = 'GET {} HTTP/1.1\r\nHost: {}\r\nConnection: Keep-Alive\r\n\r\n'.format(resource,host)
-        print(request)
         self.client.sendall(request.encode())
 
     def readHeader(self):
@@ -143,10 +141,10 @@ class Client:
         return (header.decode(),content)
     
     def download(self, url):
+        
         self.sendRequest(url)
         header, content = self.receiveResponse()
-        #self.downloadFile(url,content)
-        print(header)
+        self.downloadFile(url,content)
     
     def downloadFolder(self,data):
         allFile = []
@@ -217,8 +215,10 @@ class Client:
         
     def connect(self):
         
-        print("Client connected to web server Ip: " + self.host + "\n")
         
+        self.client.connect((self.host,self.port))
+        self.client.settimeout(5)
+        print("Client connected to web server Ip: " + self.host + "\n")
         self.sendRequest(self.url)
         header,content = self.receiveResponse()
         self.downloadFile(self.url,content)  

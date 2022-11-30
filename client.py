@@ -13,7 +13,6 @@ class Client:
         self.url = url
         self.client = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
         self.client.connect((self.host,self.port))
-        self.client.settimeout(5)
     
     def sendRequest(self,url):
         """ Send HTTP request to sever """
@@ -30,19 +29,19 @@ class Client:
             host = host.split("/")[0]
             resource = url.replace("http://","")
             resource = resource[resource.find("/"):]
-            
+        
+        self.client.settimeout(100)
         #HTTP Request
         request = 'GET {} HTTP/1.1\r\nHost: {}\r\nConnection: Keep-Alive\r\n\r\n'.format(resource,host)
-        print(request)
         self.client.sendall(request.encode())
 
     def readHeader(self):
         """ Read the header of HTTP response """
         data = b''
-        chunk_size = 1
+        buffer_size = 1
         try:
             while b'\r\n\r\n' not in data:
-                chunk = self.client.recv(chunk_size)
+                chunk = self.client.recv(buffer_size)
                 if not chunk:
                     break
                 data += chunk
@@ -53,11 +52,11 @@ class Client:
     def readContentLength(self,contentLength):
         """ Read the content of HTTP response in Content-Length form """
         data = b''
-        chunk_size = 16000
+        buffer_size = 16000
         length = 0
         try:
             while  contentLength >= length: 
-                chunk = self.client.recv(chunk_size)
+                chunk = self.client.recv(buffer_size)
                 if not chunk:
                     break
                 data += chunk
@@ -72,21 +71,21 @@ class Client:
         while True:
             chunk_size = b''
             temp = b''
+            #Receive chunk size
             while b'\r\n' not in chunk_size:
                 temp = self.client.recv(1)
                 chunk_size += temp
-            print(chunk_size)
             chunk_size = int(chunk_size.decode(),16)
-            print(chunk_size)
+            #End of content
             if chunk_size == 0:
                 break
+
             chunk = b''
             data = b''
-            
-            while len(data) != chunk_size:
-                chunk = self.client.recv(16000)
-                data += chunk
-            print(len(data))
+            #Receive chunk by chunk size
+            chunk = self.client.recv(chunk_size)
+            data += chunk
+            #Receive \r\n at the end of chunk
             chunk = self.client.recv(2)
             content += data
             
@@ -120,6 +119,7 @@ class Client:
         """ Return header and content of response """
         header = bytes()
         content = bytes()
+
         # read until at end of header
         data = self.readHeader()
 
@@ -137,32 +137,29 @@ class Client:
             content += self.readTransferEncoding()
         # Download file Content-Length
         else:
-            # read until end of Content Length
             content += self.readContentLength(contentLength)
 
-        return (header.decode(),content)
+        return content
     
     def download(self, url):
+        """Send request to server and receive response then download"""
         self.sendRequest(url)
-        header, content = self.receiveResponse()
-        #self.downloadFile(url,content)
-        print(header)
+        content = self.receiveResponse()
+        self.downloadFile(url,content)
     
     def downloadFolder(self,data):
+        """Analysis file html to get urls then download them"""
         allFile = []
+        #Get name file in tag href in html
         my_dict = re.findall('(?<=<a href=")[^"]*', data.decode('utf8'))
         sub = ''
         for x in my_dict:
-            
-        #print(x, end = " \n")
         # simple skip page bookmarks, like #about
             if x[0] == '#':
                 continue
             if x[0] =='?':
                 continue
         # simple control absolute url, like /about.html
-        # also be careful with redirects and add more flexible
-        # processing, if needed
             if x[0] == '/':
                 sub = self.url + sub
                 continue
@@ -171,57 +168,60 @@ class Client:
             
             url = x
             allFile.append(url)
-    
-        numberThread = []
+            
         for i in range(0,len(allFile)):
-            numberThread.append(Thread(target=self.download, args=(allFile[i],)))
-        for i in numberThread:
-            i.start()
-        for i in numberThread:
-            i.join()
+            Thread(target=self.download, args=(allFile[i],)).start()
+        
             
     
     def downloadFile(self,url,data):
+        """Download data from server in file"""
         global isInFolder
         global folderName
         downloadDir = os.getcwd()
         host =  url.replace("http://","")
+
         if host.find("/") == - 1 or host[host.find("/"):] == "/":
-            filename = "index.html"
-        elif url[-1] == "/" and isInFolder == False: #download folder
+            fileName = "index.html"
+        elif url[-1] == "/" and isInFolder == False: #Download folder
             isInFolder = True
             folderName = url.split("/")[-2]
             path = os.path.join(downloadDir, folderName)
             isExit = os.path.exists(path)
             if not isExit:
-                os.makedirs(path)#tao thu muc dan den
+                os.makedirs(path) #Create folder
             self.downloadFolder(data)
             print("All files are saved in " + path)
             return
         else:
-            filename = url.split("/")[-1]
-            filename = filename.replace(" ","_")
+            fileName = url.split("/")[-1]
+            fileName = fileName.replace(" ","_")
 
+        #Download file in folder
         if(isInFolder == True):
-            path = downloadDir +"\\" + folderName + "\\" + filename
+            path = downloadDir +"\\" + folderName + "\\" + fileName
             print("Saved in " + path)
             file = open(path, 'wb') 
             file.write(data)
             file.close()
+        #Download file
         else:
-            path = downloadDir + "\\" + filename
+            path = downloadDir + "\\" + fileName
             print("Saved in " + path)
             file = open(path, 'wb') 
             file.write(data)
             file.close()
         
     def connect(self):
-        
+        self.client = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+        self.client.connect((self.host,self.port))
         print("Client connected to web server Ip: " + self.host + "\n")
         
         self.sendRequest(self.url)
-        header,content = self.receiveResponse()
+        content = self.receiveResponse()
         self.downloadFile(self.url,content)  
+
+
         self.client.close()
 
     
