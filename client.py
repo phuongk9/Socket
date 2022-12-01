@@ -1,5 +1,4 @@
 import socket
-from urllib import parse
 import os
 from threading import Thread
 import re
@@ -8,30 +7,31 @@ import time
 isInFolder = False
 folderName = ""
 class Client:
-    def __init__(self,host,port,url):
-        self.host = host
-        self.port = port
+    def __init__(self,port,url):
         self.url = url
+        self.host = self.getHost(self.url)
+        self.port = port
         self.client = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-        self.client.connect((self.host,self.port))
-        self.client.settimeout(5)
-
-    def sendRequest(self,url):
-        """ Send HTTP request to sever """
+        
+    def getHost(self,url):
+        """Get host in url"""
         host =  url.replace("http://","")
-
-        #Ex: http://example.com
-        if host.find("/") == -1: #there is no resource
-            resource = "/index.html"
-        #Ex: http://example.com/
-        elif host[host.find("/"):] == '/':
+        if host.find("/"):
             host = host.split("/")[0]
+        return host          
+          
+    def sendRequest(self,url):
+        """ Send HTTP request to server """
+        temp =  url.replace("http://","")
+
+        #Ex: http://example.com or http://example.com/
+        if temp.find("/") == -1 or temp[temp.find("/"):] == '/': #there is no resource
             resource = "/index.html"
         else:
-            host = host.split("/")[0]
             resource = url.replace("http://","")
             resource = resource[resource.find("/"):]
-                
+        
+        host = self.getHost(url)
         #HTTP Request
         request = 'GET {} HTTP/1.1\r\nHost: {}\r\nConnection: Keep-Alive\r\n\r\n'.format(resource,host)
         try:
@@ -45,11 +45,10 @@ class Client:
             while not connected:  
                 # attempt to reconnect, otherwise sleep for 2 seconds  
                 try:  
-                    newClient = Client(self.host,self.port,self.url)
-                    self.client = newClient.client
-                    print( "Reconnect successfully\n" )  
-                    connected = True  
-                    newClient.sendRequest(newClient.url)                
+                    newClient = Client(self.port,self.url)
+                    print( "Reconnect successfully\n" ) 
+                    newClient.connect() 
+                    connected = True                
                 except socket.error:  
                     time.sleep(2)  
 
@@ -73,10 +72,10 @@ class Client:
             while not connected:  
                 # attempt to reconnect, otherwise sleep for 2 seconds  
                 try:  
-                    newClient = Client(self.host,self.port,self.url)
-                    print( "Reconnect successfully\n" )  
-                    connected = True  
-                    newClient.connect()               
+                    newClient = Client(self.port,self.url)
+                    print( "Reconnect successfully\n" ) 
+                    newClient.connect() 
+                    connected = True               
                 except socket.error:  
                     time.sleep(2) 
 
@@ -104,13 +103,13 @@ class Client:
             while not connected:  
                 # attempt to reconnect, otherwise sleep for 2 seconds  
                 try:  
-                    newClient = Client(self.host,self.port,self.url)
-                    print( "Reconnect successfully\n" )  
-                    connected = True  
-                    newClient.connect()               
+                    newClient = Client(self.port,self.url)
+                    print( "Reconnect successfully\n" ) 
+                    newClient.connect()  
+                    connected = True              
                 except socket.error:  
                     time.sleep(2) 
-                    
+
         return data
 
     def readTransferEncoding(self):
@@ -148,10 +147,10 @@ class Client:
             while not connected:  
                 # attempt to reconnect, otherwise sleep for 2 seconds  
                 try:  
-                    newClient = Client(self.host,self.port,self.url)
-                    print( "Reconnect successfully\n" )  
-                    connected = True  
-                    newClient.connect()               
+                    newClient = Client(self.port,self.url)
+                    print( "Reconnect successfully\n" ) 
+                    newClient.connect() 
+                    connected = True             
                 except socket.error:  
                     time.sleep(2) 
 
@@ -206,16 +205,14 @@ class Client:
             content += self.readContentLength(contentLength)
 
         return content
-    
-    def download(self, url):
-        """Send request to server and receive response then download"""
-        self.sendRequest(url)
-        content = self.receiveResponse()
-        self.downloadFile(url,content)
-    
+       
+    def newConnect(self,url):
+        newClient = Client(self.port,url)
+        newClient.connect()
+
     def downloadFolder(self,data):
         """Analysis file html to get urls then download them"""
-        allFile = []
+        urls = []
         #Get name file in tag href in html
         my_dict = re.findall('(?<=<a href=")[^"]*', data.decode('utf8'))
         sub = ''
@@ -232,17 +229,11 @@ class Client:
             else:
                 x = sub + x
             
-            url = x
-            #allFile.append(url)
-            #self.download(url)
-            newClient = Client(self.host,self.port,url)
-            newClient.connect()
+            urls.append(x)
             
-        """ for i in range(0,len(allFile)):
-            Thread(target=self.download, args=(allFile[i],)).start() """
-        
-            
-    
+        for i in range(len(urls)):
+            Thread(target=self.newConnect, args = (urls[i],)).start()
+                             
     def downloadFile(self,url,data):
         """Download data from server in file"""
         global isInFolder
@@ -260,7 +251,6 @@ class Client:
             if not isExit:
                 os.makedirs(path) #Create folder
             self.downloadFolder(data)
-            print("All files are saved in " + path)
             return
         else:
             fileName = url.split("/")[-1]
@@ -283,6 +273,24 @@ class Client:
         
     def connect(self):
         """ Connect to server send request and receive response"""
+        try:
+            self.client.connect((self.host,self.port))
+        except socket.error:
+            print("Connection lost... reconnecting")
+            connected = False  
+            self.client.close()
+            # recreate socket 
+            while not connected:  
+                # attempt to reconnect, otherwise sleep for 2 seconds  
+                try:  
+                    newClient = Client(self.port,self.url)
+                    print( "Reconnect successfully\n" ) 
+                    newClient.connect() 
+                    connected = True             
+                except socket.error:  
+                    time.sleep(2) 
+
+        self.client.settimeout(5)
         if isInFolder == False:
             print("Client connected to  " + self.url + " at port " + str(self.port) + "\n")
         
@@ -294,10 +302,7 @@ class Client:
 
 def firsActivity(URL):
     PORT = 80
-    split_url = parse.urlsplit(URL)
-    #Get ip 
-    HOST = socket.gethostbyname(split_url.netloc)
-    client = Client(HOST,PORT,URL)
+    client = Client(PORT,URL)
     client.connect()
 
 def main():
@@ -305,6 +310,7 @@ def main():
     manyURL = URL.split()
     numberURL = len(manyURL)
     numberThread = []
+    #Multi connection
     for i in range(0, numberURL):
         numberThread.append(Thread(target=firsActivity, args=(manyURL[i],)))
     for i in numberThread:

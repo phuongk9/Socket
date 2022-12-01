@@ -3,91 +3,157 @@ from urllib import parse
 import os
 from threading import Thread
 import re
+import time
 
 isInFolder = False
 folderName = ""
 class Client:
-    def __init__(self,host,port,url):
-        self.host = host
-        self.port = port
+    def __init__(self,port,url):
         self.url = url
+        self.host = self.getHost(self.url)
+        self.port = port
         self.client = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
         
-    
-    def sendRequest(self,url):
-        """ Send HTTP request to sever """
+    def getHost(self,url):
         host =  url.replace("http://","")
-
-        #Ex: http://example.com
-        if host.find("/") == -1: #there is no resource
-            resource = "/index.html"
-        #Ex: http://example.com/
-        elif host[host.find("/"):] == '/':
+        if host.find("/"):
             host = host.split("/")[0]
+        return host          
+          
+    def sendRequest(self,url):
+        """ Send HTTP request to server """
+        temp =  url.replace("http://","")
+
+        #Ex: http://example.com or http://example.com/
+        if temp.find("/") == -1 or temp[temp.find("/"):] == '/': #there is no resource
             resource = "/index.html"
         else:
-            host = host.split("/")[0]
             resource = url.replace("http://","")
             resource = resource[resource.find("/"):]
-            
+        
+        host = self.getHost(url)
         #HTTP Request
         request = 'GET {} HTTP/1.1\r\nHost: {}\r\nConnection: Keep-Alive\r\n\r\n'.format(resource,host)
-        self.client.sendall(request.encode())
+        try:
+            self.client.sendall(request.encode())
+            print("Send request to get " + resource + "\n")
+        except socket.error:
+            print("Request fail... reconnecting\n")
+            connected = False  
+            self.client.close()
+            # recreate socket 
+            while not connected:  
+                # attempt to reconnect, otherwise sleep for 2 seconds  
+                try:  
+                    newClient = Client(self.port,self.url)
+                    print( "Reconnect successfully\n" ) 
+                    newClient.connect() 
+                    connected = True                
+                except socket.error:  
+                    time.sleep(2)  
 
     def readHeader(self):
         """ Read the header of HTTP response """
         data = b''
-        chunk_size = 1
+        buffer_size = 1
         try:
             while b'\r\n\r\n' not in data:
-                chunk = self.client.recv(chunk_size)
+                chunk = self.client.recv(buffer_size)
                 if not chunk:
                     break
                 data += chunk
         except socket.timeout:
-            print("error")
+            pass
+        except socket.error:
+            print("Connection lost.... reconnecting\n")
+            connected = False  
+            self.client.close()
+            # recreate socket 
+            while not connected:  
+                # attempt to reconnect, otherwise sleep for 2 seconds  
+                try:  
+                    newClient = Client(self.port,self.url)
+                    print( "Reconnect successfully\n" ) 
+                    newClient.connect() 
+                    connected = True               
+                except socket.error:  
+                    time.sleep(2) 
+
         return data
 
     def readContentLength(self,contentLength):
         """ Read the content of HTTP response in Content-Length form """
         data = b''
-        chunk_size = 16000
+        buffer_size = 16000
         length = 0
         try:
             while  contentLength >= length: 
-                chunk = self.client.recv(chunk_size)
+                chunk = self.client.recv(buffer_size)
                 if not chunk:
                     break
                 data += chunk
                 length += len(chunk)
         except socket.timeout:
-            print("error")
+            pass
+        except socket.error:
+            print("Connection lost.... reconnecting\n")
+            connected = False  
+            self.client.close()
+            # recreate socket 
+            while not connected:  
+                # attempt to reconnect, otherwise sleep for 2 seconds  
+                try:  
+                    newClient = Client(self.port,self.url)
+                    print( "Reconnect successfully\n" ) 
+                    newClient.connect()  
+                    connected = True              
+                except socket.error:  
+                    time.sleep(2) 
+
         return data
 
     def readTransferEncoding(self):
         """ Read the content of HTTP response in Transfer-Encoding: Chunked form """
         content = b''
-        while True:
-            chunk_size = b''
-            temp = b''
-            while b'\r\n' not in chunk_size:
-                temp = self.client.recv(1)
-                chunk_size += temp
-            print(chunk_size)
-            chunk_size = int(chunk_size.decode(),16)
-            print(chunk_size)
-            if chunk_size == 0:
-                break
-            chunk = b''
-            data = b''
-            
-            while len(data) != chunk_size:
-                chunk = self.client.recv(16000)
-                data += chunk
-            print(len(data))
-            chunk = self.client.recv(2)
-            content += data
-            
+        try:
+            while True:
+                chunk_size = b''
+                temp = b''
+                #Receive chunk size
+                while b'\r\n' not in chunk_size:
+                    temp = self.client.recv(1)
+                    chunk_size += temp
+                chunk_size = int(chunk_size.decode(),16)
+                #End of content
+                if chunk_size == 0:
+                    break
+
+                chunk = b''
+                data = b''
+                #Receive chunk by chunk size
+                while len(data) != chunk_size:
+                    chunk = self.client.recv(chunk_size)
+                    data += chunk
+                #Receive \r\n at the end of chunk
+                chunk = self.client.recv(2)
+                content += data
+        except socket.timeout:
+            pass
+        except socket.error:
+            print("Connection lost.... reconnecting\n")
+            connected = False  
+            self.client.close()
+            # recreate socket 
+            while not connected:  
+                # attempt to reconnect, otherwise sleep for 2 seconds  
+                try:  
+                    newClient = Client(self.port,self.url)
+                    print( "Reconnect successfully\n" ) 
+                    newClient.connect() 
+                    connected = True             
+                except socket.error:  
+                    time.sleep(2) 
+
         return content
 
     def separate(self, data):
@@ -118,6 +184,7 @@ class Client:
         """ Return header and content of response """
         header = bytes()
         content = bytes()
+
         # read until at end of header
         data = self.readHeader()
 
@@ -135,102 +202,110 @@ class Client:
             content += self.readTransferEncoding()
         # Download file Content-Length
         else:
-            # read until end of Content Length
             content += self.readContentLength(contentLength)
 
-        return (header.decode(),content)
-    
-    def download(self, url):
-        
-        self.sendRequest(url)
-        header, content = self.receiveResponse()
-        self.downloadFile(url,content)
-    
+        return content
+       
+    def newConnect(self,url):
+        newClient = Client(self.port,url)
+        newClient.connect()
+
     def downloadFolder(self,data):
-        allFile = []
+        """Analysis file html to get urls then download them"""
+        urls = []
+        #Get name file in tag href in html
         my_dict = re.findall('(?<=<a href=")[^"]*', data.decode('utf8'))
         sub = ''
         for x in my_dict:
-            
-        #print(x, end = " \n")
         # simple skip page bookmarks, like #about
             if x[0] == '#':
                 continue
             if x[0] =='?':
                 continue
         # simple control absolute url, like /about.html
-        # also be careful with redirects and add more flexible
-        # processing, if needed
             if x[0] == '/':
                 sub = self.url + sub
                 continue
             else:
                 x = sub + x
             
-            url = x
-            allFile.append(url)
-    
-        numberThread = []
-        for i in range(0,len(allFile)):
-            numberThread.append(Thread(target=self.download, args=(allFile[i],)))
-        for i in numberThread:
-            i.start()
-        for i in numberThread:
-            i.join()
+            urls.append(x)
             
-    
+        for i in range(len(urls)):
+            Thread(target=self.newConnect, args = (urls[i],)).start()
+                             
     def downloadFile(self,url,data):
+        """Download data from server in file"""
         global isInFolder
         global folderName
         downloadDir = os.getcwd()
         host =  url.replace("http://","")
+
         if host.find("/") == - 1 or host[host.find("/"):] == "/":
-            filename = "index.html"
-        elif url[-1] == "/" and isInFolder == False: #download folder
+            fileName = "index.html"
+        elif url[-1] == "/" and isInFolder == False: #Download folder
             isInFolder = True
             folderName = url.split("/")[-2]
             path = os.path.join(downloadDir, folderName)
             isExit = os.path.exists(path)
             if not isExit:
-                os.makedirs(path)#tao thu muc dan den
+                os.makedirs(path) #Create folder
             self.downloadFolder(data)
-            print("All files are saved in " + path)
             return
         else:
-            filename = url.split("/")[-1]
-            filename = filename.replace(" ","_")
+            fileName = url.split("/")[-1]
+            fileName = fileName.replace(" ","_")
 
+        #Download file in folder
         if(isInFolder == True):
-            path = downloadDir +"\\" + folderName + "\\" + filename
-            print("Saved in " + path)
+            path = downloadDir +"\\" + folderName + "\\" + fileName
+            print("Saved in " + path + "\n")
             file = open(path, 'wb') 
             file.write(data)
             file.close()
+        #Download file
         else:
-            path = downloadDir + "\\" + filename
-            print("Saved in " + path)
+            path = downloadDir + "\\" + fileName
+            print("Saved in " + path + "\n")
             file = open(path, 'wb') 
             file.write(data)
             file.close()
         
     def connect(self):
-        
-        
-        self.client.connect((self.host,self.port))
+        """ Connect to server send request and receive response"""
+        try:
+            self.client.connect((self.host,self.port))
+        except socket.error:
+            print("Connection lost... reconnecting")
+            connected = False  
+            self.client.close()
+            # recreate socket 
+            while not connected:  
+                # attempt to reconnect, otherwise sleep for 2 seconds  
+                try:  
+                    newClient = Client(self.port,self.url)
+                    print( "Reconnect successfully\n" ) 
+                    newClient.connect() 
+                    connected = True             
+                except socket.error:  
+                    time.sleep(2) 
+
         self.client.settimeout(5)
-        print("Client connected to web server Ip: " + self.host + "\n")
+        if isInFolder == False:
+            print("Client connected to  " + self.url + " at port " + str(self.port) + "\n")
+        
         self.sendRequest(self.url)
-        header,content = self.receiveResponse()
+        content = self.receiveResponse()
         self.downloadFile(self.url,content)  
+
         self.client.close()
 
-    
 def firsActivity(URL):
     PORT = 80
-    split_url = parse.urlsplit(URL)
+    #split_url = parse.urlsplit(URL)
     #Get ip 
-    HOST = socket.gethostbyname(split_url.netloc)
-    client = Client(HOST,PORT,URL)
+    #HOST = socket.gethostbyname(split_url.netloc)
+    client = Client(PORT,URL)
     client.connect()
 
 def main():
