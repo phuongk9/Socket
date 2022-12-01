@@ -45,7 +45,7 @@ class Client:
                     break
                 data += chunk
         except socket.timeout:
-            pass
+            print("error")
         return data
 
     def readContentLength(self,contentLength):
@@ -61,7 +61,7 @@ class Client:
                 data += chunk
                 length += len(chunk)
         except socket.timeout:
-            pass
+            print("error")
         return data
 
     def readTransferEncoding(self):
